@@ -263,6 +263,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 :root[data-theme="dark"] .grammar-badge { background: #444 !important; }
 :root[data-theme="dark"] .cat-badge { background: #1a3a5c; color: #90caf9; }
 :root[data-theme="dark"] .toast { background: #555; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 24px; transition: 0.2s; }
+.toggle-slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+.toggle-switch input:checked + .toggle-slider { background: #4a90d9; }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+:root[data-theme="dark"] .toggle-slider { background: #555; }
+:root[data-theme="dark"] .toggle-switch input:checked + .toggle-slider { background: #4a90d9; }
+#dsApiKey.has-key {
+  background-image: radial-gradient(circle, #4caf50 40%, transparent 40%) !important;
+  background-size: 12px 12px !important;
+  background-position: right 10px center !important;
+  background-repeat: no-repeat !important;
+  padding-right: 32px !important;
+}
 </style>
 </head>
 <body>
@@ -331,6 +346,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           <h3>&#x1F4DD; 语法分析</h3>
           <div id="grammarResult"></div>
         </div>
+        <div class="grammar-panel" id="aiPanel">
+          <h3>&#x1F916; AI 评价 <span style="font-size:11px;color:var(--text-secondary);font-weight:400;" id="aiModelTag"></span></h3>
+          <div id="aiResult"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -357,6 +376,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     <div class="history-list">
       <h3>&#x1F4DD; 最近练习记录</h3>
       <div id="historyList"><div class="empty-state">暂无记录，快去练习吧</div></div>
+    </div>
+    <br>
+    <div class="weekly-chart" style="margin-top:16px;">
+      <h3>&#x1F916; AI 评分设置</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+        <span style="font-size:13px;">启用 AI 评分</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="aiToggle" onchange="toggleAI()" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+        <input type="password" id="dsApiKey" placeholder="输入 DeepSeek API Key" style="flex:1;min-width:200px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);font-size:13px;font-family:inherit;background:var(--card-bg);color:var(--text);" />
+        <button class="btn btn-outline btn-small" onclick="saveDeepSeekKey()">保存</button>
+        <button class="btn btn-ghost btn-small" onclick="clearDeepSeekKey()">清除</button>
+      </div>
+      <p style="font-size:11px;margin-top:4px;" id="aiKeyStatus">未设置 API Key</p>
     </div>
     <br>
     <button class="btn btn-outline btn-small" onclick="clearStats()" style="color:var(--error)">清除所有统计数据</button>
@@ -967,8 +1003,8 @@ function calculateEnScore(userText, refText) {
   if (refTokens.length === 0) return 0;
 
   // Get cleaned words
-  const userWords = userTokens.map(t => t.replace(/[.,!?;:'"]/g, '').toLowerCase());
-  const refWords = refTokens.map(t => t.replace(/[.,!?;:'"]/g, '').toLowerCase());
+  const userWords = userTokens.map(t => t.text.replace(/[.,!?;:'"]/g, '').toLowerCase());
+  const refWords = refTokens.map(t => t.text.replace(/[.,!?;:'"]/g, '').toLowerCase());
 
   // Weight: content words ×2, stop words ×0.3
   const weights = refWords.map(w => isStopWord(w) ? 0.3 : (isContentWord(w) ? 2.0 : 1.0));
@@ -1028,7 +1064,6 @@ function submitTranslation() {
   document.getElementById('refTranslation').innerHTML = buildWordChips(refTokens, refMatch, 'ref');
   document.getElementById('rowRefLabel').textContent = isCn2en ? '参考译文' : '参考译文';
 
-  // Calculate score — semantic matching with synonyms, fuzzy matching, weighting
   const score = calculateScore(userInput, refText, isCn2en);
   const scoreEl = document.getElementById('compScore');
   let cls, emoji;
@@ -1038,19 +1073,164 @@ function submitTranslation() {
   scoreEl.className = 'comp-score ' + cls;
   scoreEl.innerHTML = `${emoji} ${score}%`;
 
-  // Record practice with duration
   const duration = Math.round((Date.now() - practiceStartTime) / 1000);
   recordPractice(sentence, userInput, duration);
 
+  // AI scoring panel
+  try {
+    const aiPanel = document.getElementById('aiPanel');
+    const aiResult = document.getElementById('aiResult');
+    if (aiPanel && aiResult) {
+      if (!getAIEnabled()) {
+        aiPanel.classList.remove('show');
+      } else {
+        aiPanel.classList.add('show');
+        const apiKey = getDeepSeekKey();
+        if (apiKey) {
+          aiResult.innerHTML = '<span style="color:var(--text-secondary);">AI 评价中...</span>';
+        } else {
+          aiResult.innerHTML = '<span style="color:var(--text-secondary);font-size:13px;">&#x1f512; 请先在统计页面设置 <b>DeepSeek API Key</b> 以启用 AI 评分<br><small>API Key 保存在本地浏览器，不会上传到任何服务器</small></span>';
+        }
+      }
+    }
+  } catch(e) { console.error(e); }
+
   // Grammar analysis (only for cn2en)
   if (isCn2en) {
-    analyzeGrammar(userInput);
+    try { analyzeGrammar(userInput); } catch(e) { console.error(e); }
   } else {
-    document.getElementById('grammarPanel').classList.remove('show');
+    try { document.getElementById('grammarPanel').classList.remove('show'); } catch(e) {}
   }
+
+  // AI scoring API call (async, with key)
+  callAIScore(userInput, refText, isCn2en);
 
   // Scroll to comparison
   comparison.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ========== DEEPSEEK AI SCORING ==========
+function getDeepSeekKey() {
+  try { return localStorage.getItem('ds_api_key') || ''; } catch(e) { return ''; }
+}
+
+function updateAIKeyStatus() {
+  const el = document.getElementById('aiKeyStatus');
+  const inp = document.getElementById('dsApiKey');
+  const key = getDeepSeekKey();
+  if (key) {
+    if (inp) { inp.classList.add('has-key'); inp.placeholder = '••••••••'; }
+    if (el) {
+      const mask = key.length <= 8 ? '****' : key.slice(0, 5) + '****' + key.slice(-3);
+      el.innerHTML = '&#x2705; 已设置: <code>' + escapeHtml(mask) + '</code>';
+      el.style.color = '#2e7d32';
+    }
+  } else {
+    if (inp) { inp.classList.remove('has-key'); inp.placeholder = '输入 DeepSeek API Key'; }
+    if (el) {
+      el.textContent = '未设置 API Key';
+      el.style.color = 'var(--text-secondary)';
+    }
+  }
+}
+
+function saveDeepSeekKey() {
+  const key = document.getElementById('dsApiKey').value.trim();
+  if (!key) { showToast('请输入 API Key'); return; }
+  try { localStorage.setItem('ds_api_key', key); } catch(e) {}
+  document.getElementById('dsApiKey').value = '';
+  updateAIKeyStatus();
+  showToast('API Key 已保存');
+}
+
+function clearDeepSeekKey() {
+  try { localStorage.removeItem('ds_api_key'); } catch(e) {}
+  document.getElementById('dsApiKey').value = '';
+  updateAIKeyStatus();
+  showToast('API Key 已清除');
+}
+
+function getAIEnabled() {
+  try { return localStorage.getItem('ds_ai_enabled') !== 'false'; } catch(e) { return true; }
+}
+
+function toggleAI() {
+  const enabled = document.getElementById('aiToggle').checked;
+  try { localStorage.setItem('ds_ai_enabled', enabled); } catch(e) {}
+}
+
+// Init AI toggle & key status on page load
+(function initAIToggle() {
+  const t = document.getElementById('aiToggle');
+  if (t) t.checked = getAIEnabled();
+  updateAIKeyStatus();
+})();
+
+async function callAIScore(userText, refText, isCn2en) {
+  if (!getAIEnabled()) return;
+  const apiKey = getDeepSeekKey();
+  if (!apiKey) return;
+
+  const aiResult = document.getElementById('aiResult');
+  if (!aiResult) return;
+  const aiTag = document.getElementById('aiModelTag');
+
+  const srcLabel = isCn2en ? '中文原文' : '英文原文';
+  const srcText = isCn2en ? getCurrentSentence()?.chinese : getCurrentSentence()?.english;
+  const dirLabel = isCn2en ? '中译英' : '英译中';
+
+  const prompt = `你是一位翻译老师。请评价以下学生的翻译质量，从准确性、流畅度、用词选择三方面给出简短评价（2-3句话），并给出0-100的分数。
+
+翻译方向：${dirLabel}
+${srcLabel}：${srcText || ''}
+学生的翻译：${userText}
+
+严格按照JSON格式回复：{"score": 85, "feedback": "评价内容"}`;
+
+  try {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 300
+      })
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      if (resp.status === 401) {
+        aiResult.innerHTML = '<span style="color:var(--error);">API Key 无效，请在统计页面重新设置</span>';
+      } else {
+        aiResult.innerHTML = `<span style="color:var(--error);">AI 请求失败 (${resp.status})</span>`;
+      }
+      if (aiTag) aiTag.textContent = '';
+      return;
+    }
+
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    // Parse JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      aiResult.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+          <span style="font-size:28px;font-weight:800;color:${parsed.score >= 80 ? '#2e7d32' : parsed.score >= 50 ? '#e65100' : '#c62828'}">${parsed.score}%</span>
+          <span style="font-size:12px;color:var(--text-secondary);">AI 评分</span>
+        </div>
+        <p style="font-size:13px;line-height:1.7;color:var(--text);">${escapeHtml(parsed.feedback)}</p>
+      `;
+    } else {
+      aiResult.innerHTML = `<p style="font-size:13px;line-height:1.7;color:var(--text);">${escapeHtml(content)}</p>`;
+    }
+    if (aiTag) aiTag.textContent = 'DeepSeek';
+  } catch (e) {
+    aiResult.innerHTML = '<span style="color:var(--error);">网络错误，请检查网络连接后重试</span>';
+    if (aiTag) aiTag.textContent = '';
+  }
 }
 
 // ========== GRAMMAR ANALYSIS ==========
@@ -1122,7 +1302,7 @@ function analyzeGrammar(text) {
 
   // 6. Count word differences vs reference as grammar hint
   const userWords = trimmed.split(/\s+/).filter(w => w.length > 0 && !/^[.,!?;:'"]$/.test(w));
-  const refWords = getCurrentSentence()?.english.split(/\s+/).filter(w => w.length > 0 && !/^[.,!?;:'"]$/.test(w)) || [];
+  const refWords = (getCurrentSentence()?.english || '').split(/\s+/).filter(w => w.length > 0 && !/^[.,!?;:'"]$/.test(w));
   if (userWords.length > 0 && refWords.length > 0) {
     const diff = userWords.length - refWords.length;
     if (Math.abs(diff) >= 5) {
