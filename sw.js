@@ -1,6 +1,5 @@
 const CACHE = 'duallingo-v2';
 const ASSETS = [
-  '.',
   'index.html',
   'manifest.json',
   'icon.svg'
