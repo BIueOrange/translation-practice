@@ -738,8 +738,143 @@ function clearInput() {
 }
 
 // ========== SUBMIT & COMPARE ==========
+// ========== SYNONYMS & HELPERS ==========
+const EN_STOP_WORDS = new Set([
+  'a','an','the','is','are','was','were','be','been','being',
+  'have','has','had','having','do','does','did','doing',
+  'will','would','shall','should','can','could','may','might','must',
+  'to','of','in','for','on','with','at','by','from','as',
+  'into','through','during','before','after','above','below',
+  'between','under','over','about','than','that','this','these','those',
+  'it','its','he','she','they','we','you','i','me','him','her','us','them',
+  'my','your','his','our','their','not','no','nor','so','if','then','than',
+  'very','just','also','only','now','here','there','all','each','every',
+  'both','few','more','most','other','some','such','up','down','out','off'
+]);
+
+const EN_CONTENT_POS = new Set([
+  'development','government','people','technology','education','environment',
+  'society','economy','culture','change','protection','progress','growth',
+  'knowledge','research','science','history','system','process','problem',
+  'challenge','opportunity','achievement','success','failure','effort','ability',
+  'measure','action','policy','resource','energy','population','health',
+  'information','communication','innovation','tradition','competition',
+  'cooperation','improve','increase','reduce','promote','develop','protect',
+  'provide','support','create','become','believe','consider','require',
+  'achieve','maintain','establish','recognize','suggest','argue','indicate',
+  'demonstrate','significant','important','essential','crucial','necessary',
+  'effective','potential','modern','traditional','global','local','national',
+  'economic','social','cultural','political','environmental','scientific',
+  'rapidly','increasingly','significantly','dramatically','effectively'
+]);
+
+const EN_SYNONYMS = [
+  ['rapid','fast','quick','swift'],
+  ['huge','enormous','tremendous','massive','vast','immense'],
+  ['change','alter','transform','shift','modify'],
+  ['important','crucial','essential','vital','critical','significant','key'],
+  ['develop','evolve','progress','advance'],
+  ['protect','safeguard','preserve','conserve'],
+  ['reduce','decrease','lower','cut','diminish','lessen'],
+  ['improve','enhance','boost','strengthen','upgrade'],
+  ['believe','think','consider','argue','contend','maintain'],
+  ['problem','issue','challenge','difficulty','concern'],
+  ['measure','step','action','initiative','approach','method'],
+  ['achieve','attain','accomplish','realize','reach'],
+  ['provide','offer','supply','deliver','give'],
+  ['create','generate','produce','establish','build'],
+  ['people','individual','person','citizen','human'],
+  ['lifestyle','way of life','living style','mode of living'],
+  ['technology','tech','technological innovation'],
+  ['aid','help','assist','support'],
+  ['choice','option','alternative','selection'],
+  ['effect','impact','influence','consequence','outcome'],
+  ['ensure','guarantee','secure','make sure'],
+  ['growth','expansion','rise','increase','development'],
+  ['resource','asset','capital','means'],
+  ['ability','capacity','capability','skill','competence'],
+  ['face','confront','encounter','deal with','tackle'],
+  ['global','worldwide','international','universal'],
+  ['benefit','advantage','gain','profit','merit'],
+  ['drawback','disadvantage','shortcoming','weakness','flaw'],
+  ['lead to','cause','result in','bring about','give rise to'],
+  ['due to','because of','owing to','as a result of'],
+];
+
+// Build synonym lookup map
+const EN_SYNONYM_MAP = {};
+EN_SYNONYMS.forEach(group => {
+  group.forEach(w => {
+    const key = w.replace(/\s+/g, '');
+    if (!EN_SYNONYM_MAP[key]) EN_SYNONYM_MAP[key] = new Set();
+    group.forEach(w2 => { if (w2 !== w) EN_SYNONYM_MAP[key].add(w2.replace(/\s+/g, '')); });
+  });
+});
+
+function isSynonym(a, b) {
+  if (a === b) return true;
+  const cleanA = a.replace(/\s+/g, '');
+  const cleanB = b.replace(/\s+/g, '');
+  if (EN_SYNONYM_MAP[cleanA] && EN_SYNONYM_MAP[cleanA].has(cleanB)) return true;
+  if (EN_SYNONYM_MAP[cleanB] && EN_SYNONYM_MAP[cleanB].has(cleanA)) return true;
+  return false;
+}
+
+function isStopWord(w) { return EN_STOP_WORDS.has(w); }
+function isContentWord(w) { return EN_CONTENT_POS.has(w); }
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  let prev = new Array(n + 1);
+  let curr = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j], curr[j-1], prev[j-1]);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+function wordSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1.0;
+  if (isSynonym(a, b)) return 0.85;
+  // Prefix/stem match: first 5+ chars match
+  if (a.length >= 5 && b.length >= 5 && a.substring(0,5) === b.substring(0,5)) return 0.75;
+  // One is prefix of the other (min 3 chars)
+  if (Math.min(a.length, b.length) >= 3 && (a.startsWith(b) || b.startsWith(a))) return 0.65;
+  // Levenshtein ≤ 1 for short words
+  if (Math.abs(a.length - b.length) <= 2 && Math.max(a.length, b.length) <= 8 && levenshtein(a, b) <= 1) {
+    return 0.55;
+  }
+  return 0;
+}
+
+function lcsCount(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function getBigrams(text) {
+  const chars = text.replace(/[，。！？；：""''（）\s,.!?;:'"()]/g, '');
+  const bigrams = [];
+  for (let i = 0; i < chars.length - 1; i++) {
+    bigrams.push(chars.substring(i, i + 2));
+  }
+  return bigrams;
+}
+
+// ========== TOKENIZATION & ALIGNMENT ==========
 function tokenize(text) {
-  // Split into words and punctuation as separate tokens
   const tokens = [];
   const parts = text.split(/([.,!?;:'"()]|\s+)/g);
   for (const p of parts) {
@@ -755,7 +890,6 @@ function tokenize(text) {
 }
 
 function buildLCS(a, b) {
-  // Returns LCS matrix between two sequences (comparing lowercase cleaned text)
   const m = a.length, n = b.length;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = 1; i <= m; i++) {
@@ -773,13 +907,9 @@ function buildLCS(a, b) {
 }
 
 function alignSequences(userTokens, refTokens) {
-  // Use LCS to align user tokens against reference tokens
   const dp = buildLCS(userTokens, refTokens);
-
-  // Backtrack to find which user tokens match which ref tokens
   const userMatch = new Array(userTokens.length).fill(-1);
   const refMatch = new Array(refTokens.length).fill(-1);
-
   let i = userTokens.length, j = refTokens.length;
   while (i > 0 && j > 0) {
     const uClean = userTokens[i - 1].text.replace(/[.,!?;:'"]/g, '').toLowerCase();
@@ -794,12 +924,10 @@ function alignSequences(userTokens, refTokens) {
       j--;
     }
   }
-
   return { userMatch, refMatch };
 }
 
 function buildWordChips(tokens, matchTarget, type) {
-  // type: 'your' or 'ref'
   return tokens.map((t, idx) => {
     if (t.type === 'punct') {
       return `<span class="word-chip chip-punct">${escapeHtml(t.text)}</span>`;
@@ -816,7 +944,6 @@ function buildWordChips(tokens, matchTarget, type) {
 }
 
 function tokenizeCn(text) {
-  // Tokenize Chinese text into characters, keeping punctuation separate
   const tokens = [];
   for (const ch of text) {
     if (/[，。！？；：""''（）\s]/.test(ch)) {
@@ -826,6 +953,59 @@ function tokenizeCn(text) {
     }
   }
   return tokens;
+}
+
+// ========== IMPROVED SCORING ==========
+function calculateScore(userText, refText, isCn2en) {
+  if (isCn2en) return calculateEnScore(userText, refText);
+  return calculateCnScore(userText, refText);
+}
+
+function calculateEnScore(userText, refText) {
+  const userTokens = tokenize(userText).filter(t => t.type === 'word');
+  const refTokens = tokenize(refText).filter(t => t.type === 'word');
+  if (refTokens.length === 0) return 0;
+
+  // Get cleaned words
+  const userWords = userTokens.map(t => t.replace(/[.,!?;:'"]/g, '').toLowerCase());
+  const refWords = refTokens.map(t => t.replace(/[.,!?;:'"]/g, '').toLowerCase());
+
+  // Weight: content words ×2, stop words ×0.3
+  const weights = refWords.map(w => isStopWord(w) ? 0.3 : (isContentWord(w) ? 2.0 : 1.0));
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+  if (totalWeight === 0) return 0;
+
+  const used = new Set();
+  let weightedScore = 0;
+
+  for (let ri = 0; ri < refWords.length; ri++) {
+    const rw = refWords[ri];
+    let bestSim = 0, bestUi = -1;
+    for (let ui = 0; ui < userWords.length; ui++) {
+      if (used.has(ui)) continue;
+      const sim = wordSimilarity(userWords[ui], rw);
+      if (sim > bestSim) { bestSim = sim; bestUi = ui; }
+    }
+    if (bestUi >= 0) used.add(bestUi);
+    weightedScore += bestSim * weights[ri];
+  }
+
+  return Math.round((weightedScore / totalWeight) * 100);
+}
+
+function calculateCnScore(userText, refText) {
+  // Bigram-based LCS (70% weight) + character-based LCS (30% weight)
+  const userBigrams = getBigrams(userText);
+  const refBigrams = getBigrams(refText);
+  const bigramMatches = lcsCount(userBigrams, refBigrams);
+  const bigramScore = refBigrams.length > 0 ? (bigramMatches / refBigrams.length) * 100 : 0;
+
+  const userChars = userText.replace(/[，。！？；：""''（）\s]/g, '');
+  const refChars = refText.replace(/[，。！？；：""''（）\s]/g, '');
+  const charMatches = lcsCount(userChars.split(''), refChars.split(''));
+  const charScore = refChars.length > 0 ? (charMatches / refChars.length) * 100 : 0;
+
+  return Math.round(bigramScore * 0.7 + charScore * 0.3);
 }
 
 function submitTranslation() {
@@ -848,10 +1028,8 @@ function submitTranslation() {
   document.getElementById('refTranslation').innerHTML = buildWordChips(refTokens, refMatch, 'ref');
   document.getElementById('rowRefLabel').textContent = isCn2en ? '参考译文' : '参考译文';
 
-  // Calculate score
-  const refWordCount = refTokens.filter(t => t.type === 'word').length;
-  const matchedRef = refMatch.filter(m => m >= 0).length;
-  const score = refWordCount > 0 ? Math.round((matchedRef / refWordCount) * 100) : 0;
+  // Calculate score — semantic matching with synonyms, fuzzy matching, weighting
+  const score = calculateScore(userInput, refText, isCn2en);
   const scoreEl = document.getElementById('compScore');
   let cls, emoji;
   if (score >= 80) { cls = 'high'; emoji = '\u{1F3AF}'; }
