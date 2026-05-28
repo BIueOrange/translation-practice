@@ -1,4 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="80" fill="#4a90d9"/>
-  <text x="256" y="340" text-anchor="middle" font-size="280" font-family="Arial,sans-serif" font-weight="bold" fill="white">D</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4a90d9"/>
+      <stop offset="100%" stop-color="#357abd"/>
+    </linearGradient>
+    <linearGradient id="bubbleLeft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e8f0fe"/>
+    </linearGradient>
+    <linearGradient id="bubbleRight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dceafe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- Left speech bubble (Chinese) -->
+  <path d="M120 180 Q120 140 160 140 L310 140 Q350 140 350 180 L350 260 Q350 300 310 300 L230 300 L170 350 L180 300 L160 300 Q120 300 120 260 Z"
+        fill="url(#bubbleLeft)" opacity="0.95"/>
+
+  <!-- Chinese character "译" in left bubble -->
+  <text x="230" y="248" text-anchor="middle" font-size="72" font-family="PingFang SC,Microsoft YaHei,Noto Sans SC,sans-serif" font-weight="700" fill="#4a90d9">译</text>
+
+  <!-- Right speech bubble (English) -->
+  <path d="M380 280 Q380 240 340 240 L160 240 Q120 240 120 280 L120 360 Q120 400 160 400 L240 400 L300 450 L290 400 L340 400 Q380 400 380 360 Z"
+        fill="url(#bubbleRight)" opacity="0.95"/>
+
+  <!-- English "A" in right bubble -->
+  <text x="255" y="350" text-anchor="middle" font-size="72" font-family="Times New Roman,Georgia,serif" font-weight="700" fill="#357abd">A</text>
+
+  <!-- Small arrows between bubbles to show translation direction -->
+  <g transform="translate(256,260)">
+    <circle cx="0" cy="0" r="18" fill="#4a90d9" opacity="0.9"/>
+    <path d="M-6,-4 L0,-8 L6,-4" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-6,4 L0,8 L6,4" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>
