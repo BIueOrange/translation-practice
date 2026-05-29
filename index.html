@@ -91,6 +91,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 .issue-warn { background: #fff8e1; }
 .issue-warn::before { background: var(--warning); }
 .issue-info { background: #e8f0fe; }
+.ai-better { background: #f0f7f0; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 12px; }
+:root[data-theme="dark"] .ai-better { background: #1a3a1a; }
 .issue-info::before { background: var(--primary); }
 .grammar-highlight { background: #ffcdd2; padding: 1px 2px; border-radius: 2px; text-decoration: underline wavy var(--error); }
 .gfix { color: var(--success); font-weight: 600; }
@@ -101,6 +103,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   .issue-error { background: #3e1515; }
   .issue-warn { background: #3e3000; }
   .issue-info { background: #152a3e; }
+  .ai-better { background: #1a3a1a; }
 }
 
 .word-chip { display: inline-block; padding: 4px 10px; margin: 3px; border-radius: 6px; font-size: 14px; font-weight: 500; font-family: var(--font-mono); border: 2px solid transparent; }
@@ -210,6 +213,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   :root:not([data-theme="light"]) .issue-error { background: #3e1515; }
   :root:not([data-theme="light"]) .issue-warn { background: #3e3000; }
   :root:not([data-theme="light"]) .issue-info { background: #152a3e; }
+  :root:not([data-theme="light"]) .ai-better { background: #1a3a1a; }
   :root:not([data-theme="light"]) .sentence-table th { background: #2a2a2a; }
   :root:not([data-theme="light"]) .sentence-table tr:hover td { background: #2a2a2a; }
   :root:not([data-theme="light"]) input,
@@ -241,6 +245,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 :root[data-theme="dark"] .issue-error { background: #3e1515; }
 :root[data-theme="dark"] .issue-warn { background: #3e3000; }
 :root[data-theme="dark"] .issue-info { background: #152a3e; }
+:root[data-theme="dark"] .ai-better { background: #1a3a1a; }
 :root[data-theme="dark"] .comp-score.high { color: #69f0ae; }
 :root[data-theme="dark"] .comp-score.mid { color: #ffab40; }
 :root[data-theme="dark"] .comp-score.low { color: #ff5252; }
@@ -565,6 +570,8 @@ let filteredIndices = [];
 let stats = { totalCompleted: 0, totalDuration: 0, streak: 0, lastPracticeDate: null, dailyCounts: {}, dailyDurations: {} };
 let history = [];
 let practiceStartTime = 0;
+let practiceAccumulatedMs = 0;
+let practiceActive = false;
 let direction = 'cn2en'; // 'cn2en' | 'en2cn'
 
 // ========== INIT ==========
@@ -733,6 +740,8 @@ function renderPractice() {
   document.getElementById('translationInput').value = '';
   document.getElementById('translationInput').focus();
   practiceStartTime = Date.now();
+  practiceAccumulatedMs = 0;
+  practiceActive = true;
   saveCurrentIndex();
 }
 
@@ -1071,8 +1080,10 @@ function submitTranslation() {
   scoreEl.className = 'comp-score ' + cls;
   scoreEl.innerHTML = `${emoji} ${score}%`;
 
-  const duration = Math.round((Date.now() - practiceStartTime) / 1000);
+  const elapsed = practiceStartTime > 0 ? (Date.now() - practiceStartTime) : 0;
+  const duration = Math.round((practiceAccumulatedMs + elapsed) / 1000);
   recordPractice(sentence, userInput, duration);
+  practiceActive = false;
 
   // AI scoring panel
   try {
@@ -1177,13 +1188,31 @@ async function callAIScore(userText, refText, isCn2en) {
   const srcText = isCn2en ? getCurrentSentence()?.chinese : getCurrentSentence()?.english;
   const dirLabel = isCn2en ? '中译英' : '英译中';
 
-  const prompt = `你是一位翻译老师。请评价以下学生的翻译质量，从准确性、流畅度、用词选择三方面给出简短评价（2-3句话），并给出0-100的分数。
+  const refLabel = isCn2en ? '参考英文' : '参考中文';
+  const refAnswer = isCn2en ? getCurrentSentence()?.english : getCurrentSentence()?.chinese;
+
+  const prompt = `你是翻译老师。请仔细批改学生的翻译，按以下格式回复。
 
 翻译方向：${dirLabel}
 ${srcLabel}：${srcText || ''}
-学生的翻译：${userText}
+学生翻译：${userText}
+${refLabel}：${refAnswer || ''}
 
-严格按照JSON格式回复：{"score": 85, "feedback": "评价内容"}`;
+请从以下维度评价：
+1. 逐句纠错——指出用词、语法、搭配的具体错误，给出修改建议，如"mind health → mental health（固定搭配）"
+2. 如果学生的翻译基本正确但不够地道，基于学生的原句进行润色改写（保留学生想表达的意思和结构，而非照抄参考答案），给出更自然的表达
+3. 综合评分（0-100），考虑准确性、流畅度、用词选择
+
+严格按照JSON格式回复：
+{
+  "score": 85,
+  "corrections": [
+    {"original": "mind health", "fixed": "mental health", "reason": "固定搭配，心理健康是 mental health"},
+    {"original": "consultion", "fixed": "counseling", "reason": "拼写错误，应为 counseling 或 consultation"}
+  ],
+  "better": "在学生原句基础上润色后的更地道表达（保留学生原意，不要照抄参考答案；如果已很好则填'无需改进'）",
+  "comment": "一两句话的总体评价"
+}`;
 
   try {
     const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -1193,7 +1222,7 @@ ${srcLabel}：${srcText || ''}
         model: 'deepseek-chat',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
-        max_tokens: 300
+        max_tokens: 500
       })
     });
 
@@ -1213,14 +1242,42 @@ ${srcLabel}：${srcText || ''}
     // Parse JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      aiResult.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-          <span style="font-size:28px;font-weight:800;color:${parsed.score >= 80 ? '#2e7d32' : parsed.score >= 50 ? '#e65100' : '#c62828'}">${parsed.score}%</span>
-          <span style="font-size:12px;color:var(--text-secondary);">AI 评分</span>
-        </div>
-        <p style="font-size:13px;line-height:1.7;color:var(--text);">${escapeHtml(parsed.feedback)}</p>
-      `;
+      const p = JSON.parse(jsonMatch[0]);
+      let html = '';
+      // Score
+      const sc = p.score || 0;
+      html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <span style="font-size:28px;font-weight:800;color:${sc >= 80 ? '#2e7d32' : sc >= 50 ? '#e65100' : '#c62828'}">${sc}%</span>
+        <span style="font-size:12px;color:var(--text-secondary);">AI 评分</span>
+      </div>`;
+      // Corrections
+      if (p.corrections && p.corrections.length > 0) {
+        html += '<div style="margin-bottom:10px;">';
+        for (const c of p.corrections) {
+          html += `<div style="font-size:12px;line-height:1.6;margin-bottom:4px;">
+            <span style="color:var(--error);text-decoration:line-through;">${escapeHtml(c.original)}</span>
+            <span style="color:var(--text-secondary);margin:0 4px;">→</span>
+            <span style="color:#2e7d32;font-weight:600;">${escapeHtml(c.fixed)}</span>
+            ${c.reason ? `<span style="color:var(--text-secondary);margin-left:4px;">(${escapeHtml(c.reason)})</span>` : ''}
+          </div>`;
+        }
+        html += '</div>';
+      }
+      // Better expression
+      if (p.better && p.better !== '无需改进') {
+        html += `<div class="ai-better">
+          <span style="color:#2e7d32;font-weight:600;">更地道的表达：</span>${escapeHtml(p.better)}
+        </div>`;
+      }
+      // Fallback: old format feedback
+      if (!p.corrections && !p.better && p.feedback) {
+        html += `<p style="font-size:13px;line-height:1.7;">${escapeHtml(p.feedback)}</p>`;
+      }
+      // Comment
+      if (p.comment) {
+        html += `<p style="font-size:12px;line-height:1.7;color:var(--text-secondary);">${escapeHtml(p.comment)}</p>`;
+      }
+      aiResult.innerHTML = html;
     } else {
       aiResult.innerHTML = `<p style="font-size:13px;line-height:1.7;color:var(--text);">${escapeHtml(content)}</p>`;
     }
@@ -1828,6 +1885,17 @@ init();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
+
+// Pause practice timer when tab is hidden
+document.addEventListener('visibilitychange', () => {
+  if (!practiceActive) return;
+  if (document.hidden && practiceStartTime > 0) {
+    practiceAccumulatedMs += Date.now() - practiceStartTime;
+    practiceStartTime = 0;
+  } else if (!document.hidden && practiceStartTime === 0) {
+    practiceStartTime = Date.now();
+  }
+});
 
 let _resizeTimer;
 window.addEventListener('resize', () => {
